@@ -1,23 +1,18 @@
 // server/handshake-ws.ts
 import express from "express";
-// FIX: Explicitly import Request, Response, and NextFunction types to resolve typing issues.
 import type { Request, Response, NextFunction } from "express";
 import http from "http";
 import { WebSocketServer, WebSocket as WsWebSocket } from "ws";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
-import { addRecord, getSummary, addDecision } from "./src/services/reinforcementMemory.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Buffer } from "buffer";
-import { GoogleGenAI, Type } from "@google/genai";
-import type { VpsLogEntry, SystemHealthInsight, SystemHealthLevel, VpsSystemInfo, VpsHealthResponse } from "./src/types.js";
-// FIX: Import process to provide correct types for process global
+import type { VpsSystemInfo, VpsHealthResponse } from "./src/types.js";
 import process from "process";
 
 
 const app = express();
-// FIX: Add root path to app.use to fix overload resolution error.
 app.use('/', express.json());
 
 // Serve the frontend build in production
@@ -26,7 +21,6 @@ const __dirname = path.dirname(__filename);
 const frontendPath = path.join(__dirname, '../../frontend/dist');
 
 if (process.env.NODE_ENV === 'production') {
-  // FIX: Add root path to app.use to fix overload resolution error.
   app.use('/', express.static(frontendPath));
 }
 
@@ -36,106 +30,6 @@ if (process.env.NODE_ENV === 'production') {
  * In production: use Redis or DB with TTL.
  */
 const sessionMap = new Map<string, { key: Buffer, expiresAt: number, createdAt: number }>();
-
-
-// --- Gemini Service (Now Optional) ---
-const GEMINI_API_KEY = process.env.API_KEY;
-let ai: GoogleGenAI | null = null;
-const isAiEnabled = !!GEMINI_API_KEY;
-
-if (isAiEnabled) {
-  ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-  console.log("[AI Engine] Gemini API Key found. AI features are ENABLED.");
-} else {
-  console.warn("[AI Engine] API_KEY environment variable not set. AI features are DISABLED. System will run in manual mode.");
-}
-
-
-function calculateMetrics(logs: VpsLogEntry[]): { successRate: number, avgDeployTime: number, hasErrors: boolean } {
-    const deployStart = logs.find(l => l.text.toLowerCase().includes('starting deployment'));
-    const deployEnd = logs.find(l => l.level === 'success' || l.level === 'error');
-    const hasErrors = logs.some(l => l.level === 'error');
-
-    let avgDeployTime = 0;
-    if (deployStart?.timestamp && deployEnd?.timestamp) {
-        avgDeployTime = (deployEnd.timestamp - deployStart.timestamp) / 1000;
-    }
-    const successRate = hasErrors ? 0 : 100;
-    return { successRate, avgDeployTime, hasErrors };
-}
-
-async function getSystemHealthInsights(logs: VpsLogEntry[]): Promise<SystemHealthInsight> {
-    const metrics = calculateMetrics(logs);
-    const fallbackResult: SystemHealthInsight = {
-        level: "Unknown",
-        message: "AI analysis is disabled on the server. Please review logs manually.",
-        metrics: {
-            successRate: metrics.successRate,
-            avgDeployTime: metrics.avgDeployTime
-        }
-    };
-
-    if (!ai) {
-        return fallbackResult;
-    }
-    
-    const logSummary = logs.map(log => `[${log.level?.toUpperCase()}] ${log.text}`).join('\n');
-
-    const prompt = `
-        You are a DevOps expert analyzing a deployment log summary. 
-        Based on the provided log and metrics, determine the system health level (Nominal, Warning, or Critical)
-        and provide a concise, one-sentence insight for the user.
-        
-        Metrics:
-        - Deployment Result: ${metrics.hasErrors ? 'FAILURE' : 'SUCCESS'}
-        - Deployment Time: ${metrics.avgDeployTime.toFixed(1)} seconds
-
-        Log Summary:
-        ---
-        ${logSummary}
-        ---
-
-        Respond ONLY with a JSON object matching this schema:
-        {
-            "level": "Nominal" | "Warning" | "Critical",
-            "message": "Your one-sentence analysis and recommendation."
-        }
-    `;
-
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        level: { type: Type.STRING },
-                        message: { type: Type.STRING }
-                    },
-                    required: ["level", "message"]
-                }
-            }
-        });
-        
-        const jsonText = response.text.trim();
-        const result = JSON.parse(jsonText);
-
-        return {
-            level: result.level as SystemHealthLevel,
-            message: result.message,
-            metrics: {
-                successRate: metrics.successRate,
-                avgDeployTime: metrics.avgDeployTime
-            }
-        };
-
-    } catch (e) {
-        console.error("Gemini health analysis failed:", e);
-        return { ...fallbackResult, message: "An error occurred during AI analysis." };
-    }
-}
 
 
 // --- Authentication & Session Management ---
@@ -166,7 +60,6 @@ function generateSession(durationSec = 600) {
 }
 
 // Middleware to protect API routes
-// FIX: Use explicitly imported Request, Response, NextFunction types to fix property not found errors.
 function validateSessionToken(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
@@ -181,7 +74,8 @@ function validateSessionToken(req: Request, res: Response, next: NextFunction) {
     return res.status(401).json({ error: "Unauthorized: Session token has expired." });
   }
 
-  req.session = session; // Attach session to request
+  // Attach session to request for potential future use, though not currently used by endpoints
+  // req.session = session; 
   next();
 }
 
@@ -206,12 +100,11 @@ app.get("/api/health", (req, res) => {
         platform: process.platform,
         memory: `${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)} MB`,
         uptime: `${process.uptime().toFixed(0)}s`,
-        loadAvg: [0.1, 0.2, 0.3], // Dummy data
+        loadAvg: [0.1, 0.2, 0.3], // Dummy data for now
     };
     const response: VpsHealthResponse = {
         status: "ok",
         system: vpsInfo,
-        isAiEnabled: isAiEnabled, // Report AI status to frontend
     };
     res.status(200).json(response);
 });
@@ -225,29 +118,6 @@ app.post("/upload", validateSessionToken, (req, res) => {
       success: true,
       message: "Package received. Initiating server-side deployment process.",
     });
-});
-
-app.post('/api/health-insights', validateSessionToken, async (req, res) => {
-    if (!isAiEnabled) {
-        const metrics = calculateMetrics(req.body.logs || []);
-        return res.json({
-            level: "Unknown",
-            message: "AI analysis is disabled on the server.",
-            metrics: { successRate: metrics.successRate, avgDeployTime: metrics.avgDeployTime }
-        });
-    }
-
-    const { logs } = req.body;
-    if (!Array.isArray(logs)) {
-        return res.status(400).json({ error: 'Invalid payload: "logs" must be an array.' });
-    }
-    try {
-        const insights = await getSystemHealthInsights(logs);
-        res.json(insights);
-    } catch (error) {
-        console.error("[Gemini] Error getting health insights:", error);
-        res.status(500).json({ error: "Failed to generate health insights." });
-    }
 });
 
 
@@ -272,59 +142,6 @@ app.post("/auth/handshake", (req, res) => {
     expiresIn: session.expiresIn,
     wsUrl 
   });
-});
-
-// Endpoint to save feedback record
-app.post('/api/feedback', validateSessionToken, (req, res) => {
-    if (!isAiEnabled) {
-        return res.status(200).json({ status: "skipped", message: "AI features disabled; feedback not recorded." });
-    }
-    if (!req.body || typeof req.body.project !== 'string') {
-        return res.status(400).json({ error: "Invalid feedback record payload." });
-    }
-    try {
-        addRecord(req.body);
-        res.status(201).json({ status: "success", message: "Feedback recorded." });
-    } catch (e) {
-        console.error("Error adding feedback record:", e);
-        res.status(500).json({ error: "Internal server error while saving feedback." });
-    }
-});
-
-// [UPDATED] Endpoint to save IDT decision log
-app.post('/api/feedback/decision', validateSessionToken, (req, res) => {
-    if (!isAiEnabled) {
-        return res.status(200).json({ status: "skipped", message: "AI features disabled; decision not logged." });
-    }
-    const decisionPayload = req.body;
-    if (!decisionPayload || !decisionPayload.contextSnapshot || typeof decisionPayload.contextSnapshot.project !== 'string') {
-        return res.status(400).json({ error: "Invalid decision payload: 'contextSnapshot.project' is required." });
-    }
-    try {
-        const { decisionId } = addDecision(decisionPayload);
-        res.status(201).json({ status: "success", message: "Decision logged.", decisionId });
-    } catch(e) {
-        console.error("Error adding decision log:", e);
-        res.status(500).json({ error: "Internal server error while saving decision." });
-    }
-});
-
-// Endpoint to get feedback summary
-app.get('/api/feedback/summary', validateSessionToken, (req, res) => {
-    if (!isAiEnabled) {
-        return res.json({ accuracyRate: 0, total: 0, successCount: 0, averageConfidence: null, trend: [] });
-    }
-    const project = req.query.project as string;
-    if (typeof project !== 'string' || !project) {
-        return res.status(400).json({ error: "Missing 'project' query parameter." });
-    }
-    try {
-        const summary = getSummary(project);
-        res.status(200).json(summary);
-    } catch (e) {
-        console.error("Error getting feedback summary:", e);
-        res.status(500).json({ error: "Internal server error while fetching summary." });
-    }
 });
 
 

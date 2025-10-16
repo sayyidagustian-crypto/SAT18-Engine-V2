@@ -20,7 +20,7 @@ function getClientSystemInfo(): ClientSystemInfo {
 
 async function getVpsHealth(): Promise<VpsHealthResponse & { vpsStatus: VpsStatus }> {
     if (!navigator.onLine) {
-        return { status: 'offline', vpsStatus: 'offline', isAiEnabled: false };
+        return { status: 'offline', vpsStatus: 'offline' };
     }
     try {
         // In the new monorepo structure, this endpoint is proxied.
@@ -33,9 +33,9 @@ async function getVpsHealth(): Promise<VpsHealthResponse & { vpsStatus: VpsStatu
             }
             return { ...data, vpsStatus: 'online' };
         }
-        return { status: 'error', vpsStatus: 'offline', isAiEnabled: false };
+        return { status: 'error', vpsStatus: 'offline' };
     } catch (error) {
-        return { status: 'error', vpsStatus: 'offline', isAiEnabled: false };
+        return { status: 'error', vpsStatus: 'offline' };
     }
 }
 
@@ -43,7 +43,6 @@ export const useSystemMonitor = () => {
   const [clientInfo, setClientInfo] = useState<ClientSystemInfo>(getClientSystemInfo());
   const [vpsInfo, setVpsInfo] = useState<VpsSystemInfo | null>(null);
   const [vpsStatus, setVpsStatus] = useState<VpsStatus>('checking');
-  const [isAiEnabled, setIsAiEnabled] = useState<boolean>(false);
 
   useEffect(() => {
     // Client monitor interval
@@ -53,9 +52,8 @@ export const useSystemMonitor = () => {
 
     // VPS monitor interval
     const checkVps = async () => {
-      const { vpsStatus: newStatus, system, isAiEnabled: aiStatus } = await getVpsHealth();
+      const { vpsStatus: newStatus, system } = await getVpsHealth();
       setVpsStatus(newStatus);
-      setIsAiEnabled(aiStatus);
       if (system) {
         setVpsInfo(system);
       } else {
@@ -64,7 +62,7 @@ export const useSystemMonitor = () => {
     };
     
     checkVps(); // Initial check
-    const vpsInterval = setInterval(checkVps, 15000); // Check every 15 seconds for faster updates for Adaptive Tuner
+    const vpsInterval = setInterval(checkVps, 15000);
 
     return () => {
       clearInterval(clientInterval);
@@ -72,5 +70,5 @@ export const useSystemMonitor = () => {
     };
   }, []);
 
-  return { clientInfo, vpsInfo, vpsStatus, isAiEnabled };
+  return { clientInfo, vpsInfo, vpsStatus };
 };

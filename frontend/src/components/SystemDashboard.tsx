@@ -1,8 +1,6 @@
 import React from 'react';
 import { useSystemMonitor } from '../hooks/useSystemMonitor';
-import type { AppState, SystemHealthInsight, AdaptiveConfig, FeedbackSummary } from '../types';
-import { SystemHealth } from './SystemHealth';
-import { AdaptiveTuner } from './AdaptiveTuner';
+import type { AppState } from '../types';
 
 const StatusPill: React.FC<{ color: 'yellow' | 'green' | 'red' | 'cyan', text: string, pulse?: boolean }> = ({ color, text, pulse }) => {
     const colorClasses = {
@@ -37,34 +35,13 @@ const getEngineStatus = (appState: AppState): { text: string; color: 'green' | '
     }
 };
 
-const AIFeatureGuard: React.FC<{ isAiEnabled: boolean, children: React.ReactNode }> = ({ isAiEnabled, children }) => {
-    if (isAiEnabled) {
-        return <>{children}</>;
-    }
-    return (
-        <div className="p-4 bg-gray-900/50 border border-gray-800 rounded-lg text-center">
-            <p className="font-bold text-sm text-gray-400">🧠 AI Features Disabled</p>
-            <p className="text-xs text-gray-500 mt-2">
-                System is running in manual mode. To enable AI-powered health insights and adaptive tuning, configure the `API_KEY` on the server.
-            </p>
-        </div>
-    );
-};
 
-export const SystemDashboard: React.FC<{ appState: AppState; systemHealth: SystemHealthInsight | null; adaptiveConfig: AdaptiveConfig | null; feedbackSummary: FeedbackSummary | null; isAiEnabled: boolean; }> = ({ appState, systemHealth, adaptiveConfig, feedbackSummary, isAiEnabled }) => {
+export const SystemDashboard: React.FC<{ appState: AppState; }> = ({ appState }) => {
   const { vpsInfo, vpsStatus } = useSystemMonitor();
   const engineStatus = getEngineStatus(appState);
 
   return (
-    <div className="flex flex-col space-y-4 text-xs text-gray-400 font-mono">
-        <AIFeatureGuard isAiEnabled={isAiEnabled}>
-            {/* System Health (Phase 4 & 4.5) */}
-            <SystemHealth health={systemHealth} feedbackSummary={feedbackSummary} />
-
-            {/* Adaptive Tuner (Phase 5) */}
-            <AdaptiveTuner config={adaptiveConfig} />
-        </AIFeatureGuard>
-        
+    <div className="flex flex-col space-y-4 text-xs text-gray-400 font-mono h-full justify-end">
         {/* Engine Status */}
          <div className="p-4 bg-gray-900/50 border border-gray-800 rounded-lg">
              <div className="flex justify-between items-center mb-3">

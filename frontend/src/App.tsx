@@ -9,18 +9,14 @@ import Toast from './components/Toast';
 import { CodeIcon } from './components/icons/CodeIcon';
 import { Logger } from './modules/logger';
 import { useProjectAnalyzer } from './hooks/useProjectAnalyzer';
-import { useSystemMonitor } from './hooks/useSystemMonitor';
 
-import type { AppState, AppStep, UploadedFile, AnalysisResult, BuildOptions, BuildResult, ToastInfo, VpsLogEntry, SystemHealthInsight, AdaptiveConfig, FeedbackSummary, FeedbackRecord, Outcome } from './types';
+import type { AppState, AppStep, UploadedFile, AnalysisResult, BuildOptions, BuildResult, ToastInfo, VpsLogEntry } from './types';
 
 // Services
 import { prepareBuild } from './modules/buildPreparer';
 import { deployToVps } from './modules/vpsDeployer';
 import { LogStream, LogCallback } from './modules/logStream';
 import { authHandler } from './modules/authHandler';
-import { getSystemHealthInsights } from './services/healthService';
-import { getAdaptiveConfig } from './services/adaptiveTuner';
-import { addFeedbackRecord, getFeedbackSummary } from './services/adaptiveFeedbackService';
 
 
 export default function App(): React.ReactElement {
@@ -30,23 +26,11 @@ export default function App(): React.ReactElement {
   const [appName, setAppName] = useState('MyWebApp');
   
   const { analysisResult, analysisError, analyzeProject, clearAnalysis } = useProjectAnalyzer();
-  const { vpsInfo, isAiEnabled } = useSystemMonitor();
   
   const [buildResult, setBuildResult] = useState<BuildResult | null>(null);
   const [toast, setToast] = useState<ToastInfo | null>(null);
   const [vpsLogs, setVpsLogs] = useState<VpsLogEntry[]>([]);
-  const [systemHealthInsight, setSystemHealthInsight] = useState<SystemHealthInsight | null>(null);
-  const [adaptiveConfig, setAdaptiveConfig] = useState<AdaptiveConfig | null>(null);
-  const [isAutoDeployEnabled, setIsAutoDeployEnabled] = useState<boolean>(false);
-  const [feedbackSummary, setFeedbackSummary] = useState<FeedbackSummary | null>(null);
   const logStreamRef = useRef<LogStream | null>(null);
-  const adaptiveConfigRef = useRef<AdaptiveConfig | null>(null);
-  const deployStartTimeRef = useRef<number | null>(null);
-
-  // Keep a ref to the latest adaptiveConfig to avoid stale closures in the log effect
-  useEffect(() => {
-    adaptiveConfigRef.current = adaptiveConfig;
-  }, [adaptiveConfig]);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info') => {
     setToast({ message, type });
@@ -121,7 +105,6 @@ export default function App(): React.ReactElement {
     if (!buildResult) return;
     setAppState('deploying');
     setVpsLogs([]); // Clear previous logs
-    deployStartTimeRef.current = Date.now();
     
     try {
       const result = await deployToVps(buildResult.blob, (message) => Logger.log('info', message));
@@ -153,91 +136,18 @@ export default function App(): React.ReactElement {
     }
   }, [buildResult, handleNewVpsLog]);
   
-  // Auto-Pipeline Effect (Phase 5)
-  useEffect(() => {
-    if (appState === 'built' && isAutoDeployEnabled) {
-      const policy = adaptiveConfig?.policy || 'IMMEDIATE';
-      const delay = (adaptiveConfig?.deployDelayInSeconds || 0) * 1000;
-      const confidence = adaptiveConfig?.confidence || 1.0;
-
-      // Safety Gate: low confidence or manual policy requires intervention
-      if (policy === 'MANUAL_APPROVAL' || confidence < 0.6) {
-          const reason = policy === 'MANUAL_APPROVAL' 
-              ? (adaptiveConfig?.reason || 'Policy requires manual approval.')
-              : `Confidence is too low (${(confidence*100).toFixed(0)}%).`;
-          
-          Logger.log('warning', `Adaptive Tuner: Manual approval required. ${reason}`);
-          showToast(`AI requires manual approval: ${reason}`, 'info');
-          setIsAutoDeployEnabled(false); // Force manual action
-          return;
-      }
-
-      if (policy === 'DELAYED') {
-          Logger.log('info', `Adaptive Tuner: Deployment delayed by ${delay / 1000}s. Reason: ${adaptiveConfig?.reason}`);
-          showToast(`Deployment delayed by ${delay / 1000}s due to system conditions.`, 'info');
-      } else {
-          Logger.log('info', 'Auto-Deploy enabled. Initiating deployment...');
-      }
-
-      const timer = setTimeout(() => handleDeploy(), delay);
-      return () => clearTimeout(timer);
-    }
-  }, [appState, isAutoDeployEnabled, handleDeploy, adaptiveConfig]);
-
-  const fetchFeedbackSummary = useCallback(async () => {
-    if (!isAiEnabled) return; // Don't fetch if AI is off
-    
-    let session = authHandler.getActiveSession();
-    if (!session) {
-        try {
-            session = await authHandler.initiateHandshake();
-        } catch (e) {
-            Logger.log('warning', 'Could not fetch initial feedback summary: Handshake failed.');
-            return;
-        }
-    }
-    const summary = await getFeedbackSummary(appName);
-    setFeedbackSummary(summary);
-  }, [appName, isAiEnabled]);
-
-
-  // Log Monitoring, Recovery & Feedback Loop Effect
+  // Log Monitoring & Recovery Effect
   useEffect(() => {
     if(vpsLogs.length > 0) {
         const lastLog = vpsLogs[vpsLogs.length - 1];
         
-        const logFeedback = async (outcome: Outcome) => {
-            if (!isAiEnabled) return; // Don't log feedback if AI is off
-            const config = adaptiveConfigRef.current;
-            if (!config) return; 
-            
-            const record: Omit<FeedbackRecord, 'id' | 'createdAt'> = {
-                project: appName,
-                environment: 'production',
-                decision: config,
-                outcome: {
-                    ...outcome,
-                    deployStartedAt: deployStartTimeRef.current ? new Date(deployStartTimeRef.current).toISOString() : undefined,
-                    deployFinishedAt: new Date().toISOString()
-                },
-                systemMetricsSnapshot: vpsInfo,
-                logSummary: vpsLogs.slice(-10).map(l => `[${l.level}] ${l.text}`).join('\n'),
-                actor: 'auto'
-            };
-            
-            await addFeedbackRecord(record);
-            await fetchFeedbackSummary();
-        };
-
         if (lastLog.level?.toLowerCase() === 'success' && lastLog.text.includes('Deployment successful')) {
             setAppState('success');
             showToast('Deployment to SAT18 VPS successful!', 'success');
             logStreamRef.current?.close();
-            logFeedback({ success: true, healthCheckPassed: true, notes: 'Deployment Succeeded' });
         } else if (lastLog.level?.toLowerCase() === 'error' && appState !== 'rollingBack' && appState !== 'error') {
             setAppState('rollingBack');
             Logger.log('warning', `Deployment failed: ${lastLog.text}. Initiating automatic rollback...`);
-            logFeedback({ success: false, healthCheckPassed: false, notes: lastLog.text });
             
             setTimeout(() => {
                 setAppState('error');
@@ -247,38 +157,8 @@ export default function App(): React.ReactElement {
             }, 2500);
         }
     }
-  }, [vpsLogs, appState, appName, vpsInfo, fetchFeedbackSummary, isAiEnabled]);
+  }, [vpsLogs, appState]);
 
-  // System Health, Adaptive Tuning & Feedback Summary Effect
-  useEffect(() => {
-    const analyzeSystem = async () => {
-      // Only run analysis if AI is enabled on the server
-      if (isAiEnabled && vpsLogs.length > 5 && ['success', 'error'].includes(appState)) {
-        try {
-          const insights = await getSystemHealthInsights(vpsLogs);
-          setSystemHealthInsight(insights);
-          Logger.log('info', `System health analysis complete. Status: ${insights.level}`);
-          
-          if(vpsInfo) {
-            const config = await getAdaptiveConfig(insights, vpsInfo, vpsLogs, appName);
-            setAdaptiveConfig(config);
-            Logger.log('info', `Adaptive Tuner recommends policy: ${config.policy}. Reason: ${config.reason}`);
-          }
-
-        } catch (e) {
-          const errorMessage = e instanceof Error ? e.message : String(e);
-          Logger.log('warning', `Could not generate system analysis: ${errorMessage}`);
-        }
-      }
-    };
-    
-    if (appState === 'idle') {
-        fetchFeedbackSummary();
-    }
-
-    analyzeSystem();
-
-  }, [appState, vpsLogs, vpsInfo, appName, fetchFeedbackSummary, isAiEnabled]);
 
   const handleReset = useCallback(() => {
     setAppState('idle');
@@ -288,9 +168,6 @@ export default function App(): React.ReactElement {
     setBuildResult(null);
     Logger.clear();
     setVpsLogs([]);
-    setSystemHealthInsight(null);
-    setAdaptiveConfig(null);
-    setIsAutoDeployEnabled(false);
     logStreamRef.current?.close();
     authHandler.clearSession();
     Logger.log('info', 'System reset. Ready for new analysis.');
@@ -328,9 +205,10 @@ export default function App(): React.ReactElement {
                     buildResult={buildResult}
                     onBack={() => setCurrentStep('analyze')}
                     vpsLogs={vpsLogs}
-                    isAutoDeployEnabled={isAutoDeployEnabled}
-                    onAutoDeployChange={setIsAutoDeployEnabled}
-                    adaptiveConfig={adaptiveConfig}
+                    // Auto-deploy is now a simple boolean toggle without AI logic
+                    isAutoDeployEnabled={false} // Default to off, can be managed with a simple state if needed
+                    onAutoDeployChange={() => { /* Placeholder */}}
+                    adaptiveConfig={null} // AI config is removed
                 />
             );
         default:
@@ -351,7 +229,7 @@ export default function App(): React.ReactElement {
         <CodeIcon className="h-8 w-8 text-cyan-400" />
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-white">SAT18 Engine v2</h1>
-          <p className="text-sm text-gray-400">Intelligent Ops Orchestration Platform</p>
+          <p className="text-sm text-gray-400">VPS Build & Deployment Tool</p>
         </div>
       </header>
 
@@ -375,11 +253,7 @@ export default function App(): React.ReactElement {
             <LogConsole />
           </div>
           <SystemDashboard 
-              appState={appState} 
-              systemHealth={systemHealthInsight} 
-              adaptiveConfig={adaptiveConfig}
-              feedbackSummary={feedbackSummary}
-              isAiEnabled={isAiEnabled}
+              appState={appState}
           />
         </div>
       </footer>

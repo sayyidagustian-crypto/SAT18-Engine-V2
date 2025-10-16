@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import type { AppState, BuildTarget, BuildResult, BuildOptions, VpsLogEntry, AdaptiveConfig } from '../types';
+import type { AppState, BuildTarget, BuildResult, BuildOptions, VpsLogEntry } from '../types';
 import { useSystemMonitor } from '../hooks/useSystemMonitor';
 import { SpinnerIcon } from './icons/SpinnerIcon';
 import { useLogger } from '../hooks/useLogger';
@@ -16,9 +16,9 @@ interface BuildDeployProps {
     buildResult: BuildResult | null;
     onBack: () => void;
     vpsLogs: VpsLogEntry[];
-    isAutoDeployEnabled: boolean;
-    onAutoDeployChange: (enabled: boolean) => void;
-    adaptiveConfig: AdaptiveConfig | null;
+    isAutoDeployEnabled: boolean; // Kept for prop consistency, but logic is removed
+    onAutoDeployChange: (enabled: boolean) => void; // Kept for prop consistency
+    adaptiveConfig: null; // Explicitly null
 }
 
 const LogLine = React.memo(({ log }: { log: LogEntry }) => (
@@ -30,7 +30,7 @@ const LogLine = React.memo(({ log }: { log: LogEntry }) => (
 
 export const BuildDeploy: React.FC<BuildDeployProps> = ({ 
     appState, appName, onAppNameChange, onBuild, onSimulateBuild, onDeploy, buildResult, 
-    onBack, vpsLogs, isAutoDeployEnabled, onAutoDeployChange, adaptiveConfig
+    onBack, vpsLogs
 }) => {
     const [target, setTarget] = useState<BuildTarget>('web');
     const { vpsStatus } = useSystemMonitor();
@@ -39,8 +39,6 @@ export const BuildDeploy: React.FC<BuildDeployProps> = ({
     const isProcessing = ['building', 'simulating', 'deploying', 'rollingBack'].includes(appState);
     const isBuilt = appState === 'built' || appState === 'success' || (appState === 'error' && buildResult !== null);
     const hasDeployed = ['deploying', 'success', 'error', 'rollingBack'].includes(appState) && buildResult !== null;
-    
-    const isManualApprovalRequired = adaptiveConfig?.policy === 'MANUAL_APPROVAL' || (adaptiveConfig?.confidence ?? 1) < 0.6;
     
     const buildLogs = useMemo(() => {
         if (appState === 'idle' || appState === 'analyzed') return [];
@@ -134,25 +132,14 @@ export const BuildDeploy: React.FC<BuildDeployProps> = ({
     const getDeployButton = () => {
         const isDeploying = appState === 'deploying';
         const isVpsOffline = vpsStatus !== 'online';
-        const isAutoDeploying = isAutoDeployEnabled && !isManualApprovalRequired;
         
-        let text = 'Deploy to SAT18 VPS';
-        let className = 'bg-green-600 hover:bg-green-700';
-        let disabled = isDeploying || isVpsOffline || isAutoDeploying;
+        const text = 'Deploy to SAT18 VPS';
+        const className = 'bg-green-600 hover:bg-green-700';
+        const disabled = isDeploying || isVpsOffline;
         let title = '';
 
         if (isVpsOffline) title = 'VPS is offline';
-        else if (isAutoDeploying) title = 'Auto-Deploy is active and will proceed automatically.';
         
-        // Override for manual/delayed policies
-        if (adaptiveConfig && adaptiveConfig.policy !== 'IMMEDIATE') {
-            text = 'Deploy Now (Override)';
-            className = 'bg-yellow-600 hover:bg-yellow-700';
-            // Allow override even if auto-deploy is enabled but delayed
-            disabled = isDeploying || isVpsOffline; 
-            title = 'Override AI recommendation and deploy immediately.';
-        }
-
         return (
              <button
                 onClick={onDeploy}
@@ -226,21 +213,7 @@ export const BuildDeploy: React.FC<BuildDeployProps> = ({
 
                     {isBuilt && (
                         <div className="border-t border-gray-700 pt-4 animate-fade-in">
-                            <div className="flex items-center justify-between mb-3">
-                                <h3 className="text-lg font-medium text-white">Deployment Pipeline</h3>
-                                <div className="flex items-center space-x-2" title={isManualApprovalRequired ? `Auto-deploy disabled: ${adaptiveConfig?.reason}` : ''}>
-                                    <span className={`text-sm font-medium ${isAutoDeployEnabled && !isManualApprovalRequired ? 'text-cyan-400' : 'text-gray-400'} ${isManualApprovalRequired ? 'italic' : ''}`}>
-                                        {isManualApprovalRequired ? 'Manual Approval' : 'Auto-Deploy'}
-                                    </span>
-                                    <button
-                                        onClick={() => onAutoDeployChange(!isAutoDeployEnabled)}
-                                        disabled={isManualApprovalRequired}
-                                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${isAutoDeployEnabled && !isManualApprovalRequired ? 'bg-cyan-500' : 'bg-gray-600'}`}
-                                    >
-                                        <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${isAutoDeployEnabled && !isManualApprovalRequired ? 'translate-x-5' : 'translate-x-0'}`} />
-                                    </button>
-                                </div>
-                            </div>
+                            <h3 className="text-lg font-medium text-white mb-3">Deployment Pipeline</h3>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <button
                                     onClick={handleDownload}
