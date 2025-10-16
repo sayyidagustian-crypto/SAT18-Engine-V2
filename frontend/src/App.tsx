@@ -30,7 +30,7 @@ export default function App(): React.ReactElement {
   const [appName, setAppName] = useState('MyWebApp');
   
   const { analysisResult, analysisError, analyzeProject, clearAnalysis } = useProjectAnalyzer();
-  const { vpsInfo } = useSystemMonitor();
+  const { vpsInfo, isAiEnabled } = useSystemMonitor();
   
   const [buildResult, setBuildResult] = useState<BuildResult | null>(null);
   const [toast, setToast] = useState<ToastInfo | null>(null);
@@ -185,8 +185,8 @@ export default function App(): React.ReactElement {
   }, [appState, isAutoDeployEnabled, handleDeploy, adaptiveConfig]);
 
   const fetchFeedbackSummary = useCallback(async () => {
-    // We need a session to talk to the API. If a user just loaded the app,
-    // they won't have one. We can do a "silent" handshake.
+    if (!isAiEnabled) return; // Don't fetch if AI is off
+    
     let session = authHandler.getActiveSession();
     if (!session) {
         try {
@@ -198,7 +198,7 @@ export default function App(): React.ReactElement {
     }
     const summary = await getFeedbackSummary(appName);
     setFeedbackSummary(summary);
-  }, [appName]);
+  }, [appName, isAiEnabled]);
 
 
   // Log Monitoring, Recovery & Feedback Loop Effect
@@ -207,8 +207,9 @@ export default function App(): React.ReactElement {
         const lastLog = vpsLogs[vpsLogs.length - 1];
         
         const logFeedback = async (outcome: Outcome) => {
+            if (!isAiEnabled) return; // Don't log feedback if AI is off
             const config = adaptiveConfigRef.current;
-            if (!config) return; // Don't log feedback if there was no adaptive config
+            if (!config) return; 
             
             const record: Omit<FeedbackRecord, 'id' | 'createdAt'> = {
                 project: appName,
@@ -225,7 +226,6 @@ export default function App(): React.ReactElement {
             };
             
             await addFeedbackRecord(record);
-            // Refresh summary after logging
             await fetchFeedbackSummary();
         };
 
@@ -247,12 +247,13 @@ export default function App(): React.ReactElement {
             }, 2500);
         }
     }
-  }, [vpsLogs, appState, appName, vpsInfo, fetchFeedbackSummary]);
+  }, [vpsLogs, appState, appName, vpsInfo, fetchFeedbackSummary, isAiEnabled]);
 
   // System Health, Adaptive Tuning & Feedback Summary Effect
   useEffect(() => {
     const analyzeSystem = async () => {
-      if (vpsLogs.length > 5 && ['success', 'error'].includes(appState)) {
+      // Only run analysis if AI is enabled on the server
+      if (isAiEnabled && vpsLogs.length > 5 && ['success', 'error'].includes(appState)) {
         try {
           const insights = await getSystemHealthInsights(vpsLogs);
           setSystemHealthInsight(insights);
@@ -277,7 +278,7 @@ export default function App(): React.ReactElement {
 
     analyzeSystem();
 
-  }, [appState, vpsLogs, vpsInfo, appName, fetchFeedbackSummary]);
+  }, [appState, vpsLogs, vpsInfo, appName, fetchFeedbackSummary, isAiEnabled]);
 
   const handleReset = useCallback(() => {
     setAppState('idle');
@@ -378,6 +379,7 @@ export default function App(): React.ReactElement {
               systemHealth={systemHealthInsight} 
               adaptiveConfig={adaptiveConfig}
               feedbackSummary={feedbackSummary}
+              isAiEnabled={isAiEnabled}
           />
         </div>
       </footer>

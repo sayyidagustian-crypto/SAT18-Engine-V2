@@ -68,9 +68,11 @@ export interface VpsSystemInfo {
 }
 
 // Respon JSON lengkap dari endpoint health VPS
+// FIX: Added isAiEnabled to VpsHealthResponse to match server implementation and frontend expectation.
 export interface VpsHealthResponse {
   status: string;
   system?: VpsSystemInfo;
+  isAiEnabled: boolean; // Flag to indicate if AI features are active on the server
 }
 
 // --- Tipe untuk State Aplikasi ---

@@ -71,6 +71,7 @@ export interface VpsSystemInfo {
 export interface VpsHealthResponse {
   status: string;
   system?: VpsSystemInfo;
+  isAiEnabled: boolean; // Flag to indicate if AI features are active on the server
 }
 
 // --- Tipe untuk State Aplikasi ---

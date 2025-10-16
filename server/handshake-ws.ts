@@ -38,14 +38,18 @@ if (process.env.NODE_ENV === 'production') {
 const sessionMap = new Map<string, { key: Buffer, expiresAt: number, createdAt: number }>();
 
 
-// --- Gemini Service ---
+// --- Gemini Service (Now Optional) ---
 const GEMINI_API_KEY = process.env.API_KEY;
 let ai: GoogleGenAI | null = null;
-if (GEMINI_API_KEY) {
+const isAiEnabled = !!GEMINI_API_KEY;
+
+if (isAiEnabled) {
   ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  console.log("[AI Engine] Gemini API Key found. AI features are ENABLED.");
 } else {
-  console.warn("[Gemini] API_KEY environment variable not set. Health insight features will be disabled.");
+  console.warn("[AI Engine] API_KEY environment variable not set. AI features are DISABLED. System will run in manual mode.");
 }
+
 
 function calculateMetrics(logs: VpsLogEntry[]): { successRate: number, avgDeployTime: number, hasErrors: boolean } {
     const deployStart = logs.find(l => l.text.toLowerCase().includes('starting deployment'));
@@ -62,11 +66,9 @@ function calculateMetrics(logs: VpsLogEntry[]): { successRate: number, avgDeploy
 
 async function getSystemHealthInsights(logs: VpsLogEntry[]): Promise<SystemHealthInsight> {
     const metrics = calculateMetrics(logs);
-    const logSummary = logs.map(log => `[${log.level?.toUpperCase()}] ${log.text}`).join('\n');
-
     const fallbackResult: SystemHealthInsight = {
         level: "Unknown",
-        message: "AI analysis could not be performed. Please review logs manually.",
+        message: "AI analysis is disabled on the server. Please review logs manually.",
         metrics: {
             successRate: metrics.successRate,
             avgDeployTime: metrics.avgDeployTime
@@ -76,6 +78,8 @@ async function getSystemHealthInsights(logs: VpsLogEntry[]): Promise<SystemHealt
     if (!ai) {
         return fallbackResult;
     }
+    
+    const logSummary = logs.map(log => `[${log.level?.toUpperCase()}] ${log.text}`).join('\n');
 
     const prompt = `
         You are a DevOps expert analyzing a deployment log summary. 
@@ -129,7 +133,7 @@ async function getSystemHealthInsights(logs: VpsLogEntry[]): Promise<SystemHealt
 
     } catch (e) {
         console.error("Gemini health analysis failed:", e);
-        return fallbackResult;
+        return { ...fallbackResult, message: "An error occurred during AI analysis." };
     }
 }
 
@@ -198,7 +202,6 @@ setInterval(() => {
 
 // Health check endpoint for the VPS monitor
 app.get("/api/health", (req, res) => {
-    // This is a simplified health check. In a real app, you'd check DB connections, etc.
     const vpsInfo: VpsSystemInfo = {
         platform: process.platform,
         memory: `${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)} MB`,
@@ -207,7 +210,8 @@ app.get("/api/health", (req, res) => {
     };
     const response: VpsHealthResponse = {
         status: "ok",
-        system: vpsInfo
+        system: vpsInfo,
+        isAiEnabled: isAiEnabled, // Report AI status to frontend
     };
     res.status(200).json(response);
 });
@@ -224,6 +228,15 @@ app.post("/upload", validateSessionToken, (req, res) => {
 });
 
 app.post('/api/health-insights', validateSessionToken, async (req, res) => {
+    if (!isAiEnabled) {
+        const metrics = calculateMetrics(req.body.logs || []);
+        return res.json({
+            level: "Unknown",
+            message: "AI analysis is disabled on the server.",
+            metrics: { successRate: metrics.successRate, avgDeployTime: metrics.avgDeployTime }
+        });
+    }
+
     const { logs } = req.body;
     if (!Array.isArray(logs)) {
         return res.status(400).json({ error: 'Invalid payload: "logs" must be an array.' });
@@ -263,6 +276,9 @@ app.post("/auth/handshake", (req, res) => {
 
 // Endpoint to save feedback record
 app.post('/api/feedback', validateSessionToken, (req, res) => {
+    if (!isAiEnabled) {
+        return res.status(200).json({ status: "skipped", message: "AI features disabled; feedback not recorded." });
+    }
     if (!req.body || typeof req.body.project !== 'string') {
         return res.status(400).json({ error: "Invalid feedback record payload." });
     }
@@ -277,6 +293,9 @@ app.post('/api/feedback', validateSessionToken, (req, res) => {
 
 // [UPDATED] Endpoint to save IDT decision log
 app.post('/api/feedback/decision', validateSessionToken, (req, res) => {
+    if (!isAiEnabled) {
+        return res.status(200).json({ status: "skipped", message: "AI features disabled; decision not logged." });
+    }
     const decisionPayload = req.body;
     if (!decisionPayload || !decisionPayload.contextSnapshot || typeof decisionPayload.contextSnapshot.project !== 'string') {
         return res.status(400).json({ error: "Invalid decision payload: 'contextSnapshot.project' is required." });
@@ -292,6 +311,9 @@ app.post('/api/feedback/decision', validateSessionToken, (req, res) => {
 
 // Endpoint to get feedback summary
 app.get('/api/feedback/summary', validateSessionToken, (req, res) => {
+    if (!isAiEnabled) {
+        return res.json({ accuracyRate: 0, total: 0, successCount: 0, averageConfidence: null, trend: [] });
+    }
     const project = req.query.project as string;
     if (typeof project !== 'string' || !project) {
         return res.status(400).json({ error: "Missing 'project' query parameter." });

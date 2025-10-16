@@ -20,7 +20,7 @@ function getClientSystemInfo(): ClientSystemInfo {
 
 async function getVpsHealth(): Promise<VpsHealthResponse & { vpsStatus: VpsStatus }> {
     if (!navigator.onLine) {
-        return { status: 'offline', vpsStatus: 'offline' };
+        return { status: 'offline', vpsStatus: 'offline', isAiEnabled: false };
     }
     try {
         // In the new monorepo structure, this endpoint is proxied.
@@ -33,9 +33,9 @@ async function getVpsHealth(): Promise<VpsHealthResponse & { vpsStatus: VpsStatu
             }
             return { ...data, vpsStatus: 'online' };
         }
-        return { status: 'error', vpsStatus: 'offline' };
+        return { status: 'error', vpsStatus: 'offline', isAiEnabled: false };
     } catch (error) {
-        return { status: 'error', vpsStatus: 'offline' };
+        return { status: 'error', vpsStatus: 'offline', isAiEnabled: false };
     }
 }
 
@@ -43,6 +43,7 @@ export const useSystemMonitor = () => {
   const [clientInfo, setClientInfo] = useState<ClientSystemInfo>(getClientSystemInfo());
   const [vpsInfo, setVpsInfo] = useState<VpsSystemInfo | null>(null);
   const [vpsStatus, setVpsStatus] = useState<VpsStatus>('checking');
+  const [isAiEnabled, setIsAiEnabled] = useState<boolean>(false);
 
   useEffect(() => {
     // Client monitor interval
@@ -52,8 +53,9 @@ export const useSystemMonitor = () => {
 
     // VPS monitor interval
     const checkVps = async () => {
-      const { vpsStatus: newStatus, system } = await getVpsHealth();
+      const { vpsStatus: newStatus, system, isAiEnabled: aiStatus } = await getVpsHealth();
       setVpsStatus(newStatus);
+      setIsAiEnabled(aiStatus);
       if (system) {
         setVpsInfo(system);
       } else {
@@ -70,5 +72,5 @@ export const useSystemMonitor = () => {
     };
   }, []);
 
-  return { clientInfo, vpsInfo, vpsStatus };
+  return { clientInfo, vpsInfo, vpsStatus, isAiEnabled };
 };
