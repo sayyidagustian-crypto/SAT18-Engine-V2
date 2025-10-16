@@ -1,0 +1,5 @@
+{
+  "name": "SAT18 Engine v2",
+  "description": "An offline-first build and deployment tool for web projects. Prepare platform-specific packages (Web, Android, iOS) and deploy directly to the SAT18 VPS.",
+  "requestFramePermissions": []
+}
