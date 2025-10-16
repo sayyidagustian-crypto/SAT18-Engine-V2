@@ -1,0 +1,31 @@
+{
+  "name": "sat18-engine-v2-server",
+  "version": "1.0.0",
+  "description": "Handshake, WebSocket, and API server for SAT18 Engine v2",
+  "main": "dist/handshake-ws.js",
+  "type": "module",
+  "scripts": {
+    "start": "node dist/handshake-ws.js",
+    "build": "tsc",
+    "dev": "node --loader ts-node/esm handshake-ws.ts",
+    "migrate": "node scripts/migrate.js",
+    "test:audit": "node --loader ts-node/esm scripts/test-audit.js",
+    "verify:persistence": "node scripts/verify-persistence.js"
+  },
+  "dependencies": {
+    "@google/genai": "^0.2.1",
+    "better-sqlite3": "^11.1.2",
+    "express": "^4.19.2",
+    "uuid": "^10.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.10",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.9",
+    "@types/uuid": "^9.0.8",
+    "@types/ws": "^8.5.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.2"
+  }
+}
